@@ -52,8 +52,8 @@ sudo apt install libiio-dev
 ## Building
 
 ```bash
-git clone https://github.com/youruser/plutosdr-retranslator.git
-cd plutosdr-retranslator
+git clone https://github.com/khlud07/retranslator.git
+cd retranslator
 make
 ```
 
