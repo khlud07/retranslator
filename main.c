@@ -5,7 +5,8 @@
  * Usage:
  *   ./retranslator [options]
  *   -u  URI             Device URI         (default: ip:192.168.2.1)
- *   -f  FREQ_HZ         RX+TX LO freq Hz   (default: 433000000)
+ *   -f  RX_FREQ_HZ      RX LO freq Hz      (default: 433000000)
+ *   -x  TX_FREQ_HZ      TX LO freq Hz      (default: 868000000)
  *   -r  SAMP_RATE_HZ    Sample rate Hz     (default: 2500000)
  *   -b  BANDWIDTH_HZ    RF bandwidth Hz    (default: 2000000)
  *   -t  TX_GAIN_MDB     TX atten mdB       (default: -10000  → -10 dB)
@@ -30,7 +31,8 @@
 
 /* ── defaults ──────────────────────────────────────────────────────────── */
 #define DEFAULT_URI         "ip:192.168.2.1"
-#define DEFAULT_FREQ        433000000LL      /* Hz  */
+#define DEFAULT_RX_FREQ     433000000LL      /* Hz  */
+#define DEFAULT_TX_FREQ     868000000LL      /* Hz  */
 #define DEFAULT_SAMP_RATE   2500000LL        /* SPS */
 #define DEFAULT_BANDWIDTH   2000000LL        /* Hz  */
 #define DEFAULT_TX_GAIN     -10000LL         /* mdB — negative = attenuation */
@@ -43,7 +45,8 @@
 /* ── runtime config ────────────────────────────────────────────────────── */
 typedef struct {
     char        uri[256];
-    long long   freq;
+    long long   rx_freq;
+    long long   tx_freq;
     long long   samp_rate;
     long long   bandwidth;
     long long   tx_gain;
@@ -135,22 +138,23 @@ static int configure_phy(struct iio_context *ctx, const config_t *cfg)
     }
 
     LOG_I("Configuring AD9361 PHY...");
-    LOG_I("  Frequency  : %lld Hz", cfg->freq);
-    LOG_I("  Sample rate: %lld SPS", cfg->samp_rate);
-    LOG_I("  Bandwidth  : %lld Hz", cfg->bandwidth);
-    LOG_I("  TX gain    : %lld mdB", cfg->tx_gain);
-    LOG_I("  RX mode    : %s", cfg->gain_mode);
+    LOG_I("  RX frequency: %lld Hz", cfg->rx_freq);
+    LOG_I("  TX frequency: %lld Hz", cfg->tx_freq);
+    LOG_I("  Sample rate : %lld SPS", cfg->samp_rate);
+    LOG_I("  Bandwidth   : %lld Hz", cfg->bandwidth);
+    LOG_I("  TX gain     : %lld mdB", cfg->tx_gain);
+    LOG_I("  RX mode     : %s", cfg->gain_mode);
 
     /* sample rate — affects both RX and TX */
     if (phy_write_ll(phy, "voltage0", false, "sampling_frequency", cfg->samp_rate) < 0)
         return -1;
 
     /* RX LO frequency */
-    if (phy_write_ll(phy, "altvoltage0", true, "frequency", cfg->freq) < 0)
+    if (phy_write_ll(phy, "altvoltage0", true, "frequency", cfg->rx_freq) < 0)
         return -1;
 
     /* TX LO frequency */
-    if (phy_write_ll(phy, "altvoltage1", true, "frequency", cfg->freq) < 0)
+    if (phy_write_ll(phy, "altvoltage1", true, "frequency", cfg->tx_freq) < 0)
         return -1;
 
     /* RX RF bandwidth */
@@ -283,7 +287,8 @@ static void print_usage(const char *prog)
 {
     printf("Usage: %s [options]\n"
            "  -u URI           Device URI         (default: %s)\n"
-           "  -f FREQ_HZ       RX+TX LO freq Hz   (default: %lld)\n"
+           "  -f RX_FREQ_HZ    RX LO freq Hz      (default: %lld)\n"
+           "  -x TX_FREQ_HZ    TX LO freq Hz      (default: %lld)\n"
            "  -r SAMP_RATE_HZ  Sample rate Hz     (default: %lld)\n"
            "  -b BANDWIDTH_HZ  RF bandwidth Hz    (default: %lld)\n"
            "  -t TX_GAIN_MDB   TX atten mdB       (default: %lld)\n"
@@ -291,7 +296,7 @@ static void print_usage(const char *prog)
            "  -g GAIN_MODE     RX gain mode       (default: %s)\n"
            "  -h               Show this help\n",
            prog,
-           DEFAULT_URI, DEFAULT_FREQ, DEFAULT_SAMP_RATE,
+           DEFAULT_URI, DEFAULT_RX_FREQ, DEFAULT_TX_FREQ, DEFAULT_SAMP_RATE,
            DEFAULT_BANDWIDTH, DEFAULT_TX_GAIN,
            DEFAULT_BUF_SIZE, DEFAULT_GAIN_MODE);
 }
@@ -302,7 +307,8 @@ int main(int argc, char *argv[])
     /* default config */
     config_t cfg = {
         .uri       = DEFAULT_URI,
-        .freq      = DEFAULT_FREQ,
+        .rx_freq   = DEFAULT_RX_FREQ,
+        .tx_freq   = DEFAULT_TX_FREQ,
         .samp_rate = DEFAULT_SAMP_RATE,
         .bandwidth = DEFAULT_BANDWIDTH,
         .tx_gain   = DEFAULT_TX_GAIN,
@@ -312,10 +318,11 @@ int main(int argc, char *argv[])
 
     /* parse CLI args */
     int opt;
-    while ((opt = getopt(argc, argv, "u:f:r:b:t:s:g:h")) != -1) {
+    while ((opt = getopt(argc, argv, "u:f:x:r:b:t:s:g:h")) != -1) {
         switch (opt) {
         case 'u': strncpy(cfg.uri,       optarg, sizeof(cfg.uri) - 1);       break;
-        case 'f': cfg.freq      = atoll(optarg);                              break;
+        case 'f': cfg.rx_freq   = atoll(optarg);                              break;
+        case 'x': cfg.tx_freq   = atoll(optarg);                              break;
         case 'r': cfg.samp_rate = atoll(optarg);                              break;
         case 'b': cfg.bandwidth = atoll(optarg);                              break;
         case 't': cfg.tx_gain   = atoll(optarg);                              break;
