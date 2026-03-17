@@ -9,7 +9,7 @@
  *   -x  TX_FREQ_HZ      TX LO freq Hz      (default: 868000000)
  *   -r  SAMP_RATE_HZ    Sample rate Hz     (default: 2500000)
  *   -b  BANDWIDTH_HZ    RF bandwidth Hz    (default: 2000000)
- *   -t  TX_GAIN_MDB     TX atten mdB       (default: -10000  → -10 dB)
+ *   -t  TX_ATTEN_DB     TX attenuation dB  (default: -10.0, range: 0.0 to -89.75)
  *   -s  BUF_SIZE        Buffer size        (default: 4096)
  *   -g  GAIN_MODE       RX gain mode       (default: slow_attack)
  *   -h                  Show this help
@@ -35,7 +35,7 @@
 #define DEFAULT_TX_FREQ     868000000LL      /* Hz  */
 #define DEFAULT_SAMP_RATE   2500000LL        /* SPS */
 #define DEFAULT_BANDWIDTH   2000000LL        /* Hz  */
-#define DEFAULT_TX_GAIN     -10000LL         /* mdB — negative = attenuation */
+#define DEFAULT_TX_ATTEN_DB  -10.0           /* dB, 0.0 = max power, -89.75 = min power */
 #define DEFAULT_BUF_SIZE    4096
 #define DEFAULT_GAIN_MODE   "slow_attack"
 #define TIMEOUT_MS          5000
@@ -49,7 +49,7 @@ typedef struct {
     long long   tx_freq;
     long long   samp_rate;
     long long   bandwidth;
-    long long   tx_gain;
+    double      tx_atten_db;
     size_t      buf_size;
     char        gain_mode[32];
 } config_t;
@@ -113,6 +113,24 @@ static int phy_write_ll(struct iio_device *phy,
     return ret;
 }
 
+/* Write a long long as a string — more compatible across firmware versions */
+static int phy_write_ll_str(struct iio_device *phy,
+                             const char *ch_name, bool output,
+                             const char *attr, long long value)
+{
+    struct iio_channel *ch = iio_device_find_channel(phy, ch_name, output);
+    if (!ch) {
+        LOG_E("PHY channel '%s' not found", ch_name);
+        return -1;
+    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", value);
+    int ret = iio_channel_attr_write(ch, attr, buf);
+    if (ret < 0)
+        LOG_E("Failed to write %s/%s = %s: %s", ch_name, attr, buf, strerror(-ret));
+    return ret;
+}
+
 static int phy_write_str(struct iio_device *phy,
                          const char *ch_name, bool output,
                          const char *attr, const char *value)
@@ -142,36 +160,47 @@ static int configure_phy(struct iio_context *ctx, const config_t *cfg)
     LOG_I("  TX frequency: %lld Hz", cfg->tx_freq);
     LOG_I("  Sample rate : %lld SPS", cfg->samp_rate);
     LOG_I("  Bandwidth   : %lld Hz", cfg->bandwidth);
-    LOG_I("  TX gain     : %lld mdB", cfg->tx_gain);
+    LOG_I("  TX atten    : %.2f dB", cfg->tx_atten_db);
     LOG_I("  RX mode     : %s", cfg->gain_mode);
 
     /* sample rate — affects both RX and TX */
-    if (phy_write_ll(phy, "voltage0", false, "sampling_frequency", cfg->samp_rate) < 0)
+    if (phy_write_ll_str(phy, "voltage0", false, "sampling_frequency", cfg->samp_rate) < 0)
         return -1;
 
     /* RX LO frequency */
-    if (phy_write_ll(phy, "altvoltage0", true, "frequency", cfg->rx_freq) < 0)
+    if (phy_write_ll_str(phy, "altvoltage0", true, "frequency", cfg->rx_freq) < 0)
         return -1;
 
     /* TX LO frequency */
-    if (phy_write_ll(phy, "altvoltage1", true, "frequency", cfg->tx_freq) < 0)
+    if (phy_write_ll_str(phy, "altvoltage1", true, "frequency", cfg->tx_freq) < 0)
         return -1;
 
     /* RX RF bandwidth */
-    if (phy_write_ll(phy, "voltage0", false, "rf_bandwidth", cfg->bandwidth) < 0)
+    if (phy_write_ll_str(phy, "voltage0", false, "rf_bandwidth", cfg->bandwidth) < 0)
         return -1;
 
     /* TX RF bandwidth */
-    if (phy_write_ll(phy, "voltage0", true, "rf_bandwidth", cfg->bandwidth) < 0)
+    if (phy_write_ll_str(phy, "voltage0", true, "rf_bandwidth", cfg->bandwidth) < 0)
         return -1;
 
     /* RX gain control mode */
     if (phy_write_str(phy, "voltage0", false, "gain_control_mode", cfg->gain_mode) < 0)
         return -1;
 
-    /* TX attenuation (0 = max power, negative value in mdB) */
-    if (phy_write_ll(phy, "voltage0", true, "hardwaregain", cfg->tx_gain) < 0)
-        return -1;
+    /* TX attenuation: 0.0 = max TX power, -89.75 = min TX power (dB, written as double) */
+    {
+        struct iio_channel *ch = iio_device_find_channel(phy, "voltage0", true);
+        if (!ch) {
+            LOG_E("PHY TX voltage0 channel not found");
+            return -1;
+        }
+        int ret = iio_channel_attr_write_double(ch, "hardwaregain", cfg->tx_atten_db);
+        if (ret < 0) {
+            LOG_E("Failed to write TX hardwaregain = %.2f dB: %s",
+                  cfg->tx_atten_db, strerror(-ret));
+            return -1;
+        }
+    }
 
     LOG_I("PHY configuration done");
     return 0;
@@ -291,13 +320,13 @@ static void print_usage(const char *prog)
            "  -x TX_FREQ_HZ    TX LO freq Hz      (default: %lld)\n"
            "  -r SAMP_RATE_HZ  Sample rate Hz     (default: %lld)\n"
            "  -b BANDWIDTH_HZ  RF bandwidth Hz    (default: %lld)\n"
-           "  -t TX_GAIN_MDB   TX atten mdB       (default: %lld)\n"
+           "  -t TX_ATTEN_DB   TX attenuation dB  (default: %.1f, range: 0.0 to -89.75)\n"
            "  -s BUF_SIZE      Buffer size        (default: %d)\n"
            "  -g GAIN_MODE     RX gain mode       (default: %s)\n"
            "  -h               Show this help\n",
            prog,
            DEFAULT_URI, DEFAULT_RX_FREQ, DEFAULT_TX_FREQ, DEFAULT_SAMP_RATE,
-           DEFAULT_BANDWIDTH, DEFAULT_TX_GAIN,
+           DEFAULT_BANDWIDTH, DEFAULT_TX_ATTEN_DB,
            DEFAULT_BUF_SIZE, DEFAULT_GAIN_MODE);
 }
 
@@ -311,7 +340,7 @@ int main(int argc, char *argv[])
         .tx_freq   = DEFAULT_TX_FREQ,
         .samp_rate = DEFAULT_SAMP_RATE,
         .bandwidth = DEFAULT_BANDWIDTH,
-        .tx_gain   = DEFAULT_TX_GAIN,
+        .tx_atten_db = DEFAULT_TX_ATTEN_DB,
         .buf_size  = DEFAULT_BUF_SIZE,
         .gain_mode = DEFAULT_GAIN_MODE,
     };
@@ -325,7 +354,7 @@ int main(int argc, char *argv[])
         case 'x': cfg.tx_freq   = atoll(optarg);                              break;
         case 'r': cfg.samp_rate = atoll(optarg);                              break;
         case 'b': cfg.bandwidth = atoll(optarg);                              break;
-        case 't': cfg.tx_gain   = atoll(optarg);                              break;
+        case 't': cfg.tx_atten_db = atof(optarg);                              break;
         case 's': cfg.buf_size  = (size_t)atoi(optarg);                       break;
         case 'g': strncpy(cfg.gain_mode, optarg, sizeof(cfg.gain_mode) - 1); break;
         case 'h': print_usage(argv[0]); return 0;
