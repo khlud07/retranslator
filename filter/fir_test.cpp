@@ -21,6 +21,10 @@ int main () {
 
 
   fin=fopen("input.dat","r");
+	  if (fin == NULL) {
+		  printf("ERROR: cannot open input.dat\n");
+		  return 1;
+	  }
   fp=fopen("out.dat","w");
 
   for (i=0;i<SAMPLES;i++) {

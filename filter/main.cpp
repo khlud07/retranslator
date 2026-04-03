@@ -26,18 +26,14 @@ void fir (
 
 	acc = 0;
 	Shift_Accum_Loop:
-	for (i = N-1; i >= 0; i--) {
-        if (i == 0) {
-            shift_reg[0] = x;
-        } else {
-            shift_reg[i] = shift_reg[i-1];
-        }
+	for (int i = N-1; i > 0; i--)
+	    shift_reg[i] = shift_reg[i-1];
+	    shift_reg[0] = x;
 
-        if (i == N/2) {
-            acc += shift_reg[i] * c[i];
-        } else if (i < N/2) {
-            acc += (shift_reg[i] + shift_reg[N-1-i]) * c[i];
-        }
-    }
+	for (int i = 0; i < N/2; i++)
+	    acc += (shift_reg[i] + shift_reg[N-1-i]) * c[i];
+
+	acc += shift_reg[N/2] * c[N/2]; // middle tap
+
 	*y = acc;
 }
